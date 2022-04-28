@@ -14,6 +14,7 @@
   }).
 
 -define(DAEMON_NAME_DEFAULT, <<"econfd_daemon_default">>).
+-define(ECONFD_DAEMON_PREFIX_FMT, "/econfd/daemons/~s/").
 
 cloudi_service_init(_Args, _Prefix, _Timeout, Dispatcher) ->
   cloudi_service:subscribe(Dispatcher, "status/get"),
@@ -30,27 +31,17 @@ cloudi_service_handle_request(_RequestType, "/econfd/mgr/daemons/add/post", _Pat
   ServiceModule = 'pad_service_econfd_daemon',
 
   Return =
-  try cloudi_x_jsx:decode(Request) of
+  try cloudi_x_jsx:decode(Request, [{return_maps, false}]) of
     Decoded ->
-      Name = erlang:binary_to_atom(maps:get(<<"name">>, Decoded, ?DAEMON_NAME_DEFAULT), utf8),
-      ServicePrefix = lists:flatten(io_lib:format("/econfd/daemon/~s/", [Name])),
+      Name = erlang:binary_to_atom(proplists:get_value(<<"name">>, Decoded, ?DAEMON_NAME_DEFAULT), utf8),
+      ServicePrefix = lists:flatten(io_lib:format(?ECONFD_DAEMON_PREFIX_FMT, [Name])),
 
       case get_service(ServicePrefix) of
         [] ->
           EconfdDaemonServiceConfig = [{type, internal},
-                                          {prefix, ServicePrefix},
-                                          {module, ServiceModule},
-                                          {args,
-                                            [
-                                            % Decoded
-                                            %  {ip,               Ip},
-                                            %  {port,             Port},
-                                            %  {name,             Name},
-                                            %  {callpoint,        Callpoint},
-                                            %  {callback_module,  CallbackModule},
-                                            %  {args,             []}
-                                            ]
-                                          }],
+                                       {prefix, ServicePrefix},
+                                       {module, ServiceModule},
+                                       {args, Decoded}],
           {ok, [ServiceId]} = cloudi_service_api:services_add([EconfdDaemonServiceConfig], infinity),
           ?LOG_WARN("Adding service ~s: ~s.", [ServicePrefix, ServiceId]),
           cloudi_x_uuid:uuid_to_string(ServiceId, nodash);
@@ -90,3 +81,20 @@ get_service(Prefix) ->
               end,
               Services),
   lists:flatten(L).
+
+%% cloudit test
+
+% data = '{ \
+%   "subscriptions": [ \
+%     "get_state/get", \
+%     "stop/post" \
+%   ], \
+%   "ip": "172.26.0.3", \
+%   "port": 4565, \
+%   "name": "econfd_daemon_cloudi", \
+%   "callpoint": "default_cp", \
+%   "callback_module": "pad_service_econfd_daemon", \
+%   "args": [] \
+% }'
+
+% cloudit.post("econfd/mgr/daemons/add", data)
